@@ -8,6 +8,7 @@ import {
   type ServerTableFetchResult,
   type TableColumn,
 } from "@/components/Tables"
+import { handleRequest } from "@/lib/handleRequest"
 
 type ApiUser = {
   id: number
@@ -23,21 +24,6 @@ type UserRow = {
   email: string
   createdAt: string
 }
-
-const TOTAL_USERS = 87
-
-const mockUsers: ApiUser[] = Array.from({ length: TOTAL_USERS }, (_, index) => {
-  const id = index + 1
-  const createdDate = new Date(2024, 0, 1 + (index % 365))
-
-  return {
-    id,
-    first_name: `User${id}`,
-    last_name: `Demo`,
-    email: `user${id}@example.com`,
-    created_at: createdDate.toISOString(),
-  }
-})
 
 const columns: TableColumn<UserRow>[] = [
   {
@@ -67,15 +53,11 @@ async function fetchUsersFromServer({
   page,
   pageSize,
 }: ServerPaginationState): Promise<ServerTableFetchResult<ApiUser>> {
-  await new Promise((resolve) => setTimeout(resolve, 500))
-
-  const start = (page - 1) * pageSize
-  const end = start + pageSize
-
-  return {
-    rows: mockUsers.slice(start, end),
-    totalRows: mockUsers.length,
-  }
+  return handleRequest<ServerTableFetchResult<ApiUser>>({
+    endpoint: "/users",
+    method: "GET",
+    query: { page, pageSize },
+  })
 }
 
 export default function TablesPage() {
@@ -107,7 +89,7 @@ export default function TablesPage() {
           fetchData={fetchUsersFromServer}
           transformData={transformUsers}
           pageSize={10}
-         pageSizeOptions={[5, 10, 20, 50]}
+          pageSizeOptions={[5, 10, 20, 50]}
           emptyMessage="No users were returned by the server."
           loadingMessage="Fetching users from server..."
         />
