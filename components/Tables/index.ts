@@ -1,9 +1,9 @@
-﻿export { ServerTable } from "./server-table"
+export { ServerTable } from "./server-table"
 
 export type {
-  ServerPaginationState,
-  ServerTableFetchResult,
+  ServerTableDataRows,
+  ServerTablePaginatedRows,
   ServerTableProps,
-  ServerTableTransformContext,
+  TableColumnAlign,
   TableColumn,
 } from "./table.types"

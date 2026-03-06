@@ -13,141 +13,154 @@ import {
 } from "@/components/ui/table"
 import { cn } from "@/lib/utils"
 
-import type { ServerTableProps } from "./table.types"
+import type {
+  ServerTablePaginatedRows,
+  ServerTableProps,
+} from "./table.types"
 
-function ServerTable<TRawData, TData = TRawData>({
+const DEFAULT_PAGE_SIZE = 10
+
+function isPaginatedRows<TData extends Record<string, unknown>>(
+  dataRows: unknown
+): dataRows is ServerTablePaginatedRows<TData> {
+  return (
+    !!dataRows &&
+    typeof dataRows === "object" &&
+    "result" in dataRows &&
+    "totalCount" in dataRows &&
+    "pageNo" in dataRows
+  )
+}
+
+function getRowValue<TData extends Record<string, unknown>>(
+  row: TData,
+  key: keyof TData | string | undefined
+) {
+  if (!key) {
+    return undefined
+  }
+
+  return row[key as keyof TData]
+}
+
+function ServerTable<TData extends Record<string, unknown>>({
+  loading = false,
   columns,
-  fetchData,
-  transformData,
-  initialPage = 1,
-  pageSize = 10,
-  pageSizeOptions = [10, 20, 50, 100, 500, 1000],
-  emptyMessage = "No data found.",
-  loadingMessage = "Loading data...",
+  dataRows,
+  noPagination = false,
+  requestDataByPageNo,
+  errorHeader = false,
+  defaultRowsPerPage = DEFAULT_PAGE_SIZE,
+  rowsPerPageOptions = [DEFAULT_PAGE_SIZE, 50, 100, 500, 1000],
+  emptyMessage = "No Data",
   className,
   tableClassName,
-}: ServerTableProps<TRawData, TData>) {
-  const [page, setPage] = useState(initialPage)
-  const [currentPageSize, setCurrentPageSize] = useState(pageSize)
-  const [rawRows, setRawRows] = useState<TRawData[]>([])
-  const [totalRows, setTotalRows] = useState(0)
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
+}: ServerTableProps<TData>) {
+  const [rowsPerPage, setRowsPerPage] = useState(defaultRowsPerPage)
+console.log("dataRows ServerTable", dataRows)
   useEffect(() => {
-    let isMounted = true
-
-    async function loadData() {
-      setIsLoading(true)
-      setError(null)
-
-      try {
-        const result = await fetchData({ page, pageSize: currentPageSize })
-
-        if (!isMounted) {
-          return
-        }
-
-        setRawRows(result.rows)
-        setTotalRows(result.totalRows)
-      } catch (requestError) {
-        if (!isMounted) {
-          return
-        }
-
-        const message =
-          requestError instanceof Error
-            ? requestError.message
-            : "Failed to load table data."
-        setError(message)
-        setRawRows([])
-      } finally {
-        if (isMounted) {
-          setIsLoading(false)
-        }
-      }
-    }
-
-    void loadData()
-
-    return () => {
-      isMounted = false
-    }
-  }, [fetchData, page, currentPageSize])
-
-  const rows = useMemo(
-    () =>
-      transformData
-        ? transformData(rawRows, { page, pageSize: currentPageSize })
-        : (rawRows as unknown as TData[]),
-    [transformData, rawRows, page, currentPageSize]
-  )
-
-  const totalPages = Math.max(1, Math.ceil(totalRows / currentPageSize))
-  const isFirstPage = page <= 1
-  const isLastPage = page >= totalPages
-  const hasRows = rows.length > 0
-
-  function goToPreviousPage() {
-    setPage((prev) => Math.max(1, prev - 1))
-  }
-
-  function goToNextPage() {
-    setPage((prev) => Math.min(totalPages, prev + 1))
-  }
-
-  function handlePageSizeChange(value: string) {
-    const nextPageSize = Number(value)
-
-    if (!Number.isFinite(nextPageSize) || nextPageSize <= 0) {
+    if (isPaginatedRows<TData>(dataRows) && dataRows.pageSize) {
+      setRowsPerPage(dataRows.pageSize)
       return
     }
 
-    setCurrentPageSize(nextPageSize)
-    setPage(1)
+    setRowsPerPage(defaultRowsPerPage)
+  }, [dataRows, defaultRowsPerPage])
+
+  const { rows, totalCount, pageNo } = useMemo(() => {
+    if (noPagination) {
+      return {
+        rows: Array.isArray(dataRows) ? dataRows : [],
+        totalCount: Array.isArray(dataRows) ? dataRows.length : 0,
+        pageNo: 1,
+      }
+    }
+
+    if (!isPaginatedRows<TData>(dataRows) || !dataRows.totalCount) {
+      return { rows: [] as TData[], totalCount: 0, pageNo: 1 }
+    }
+
+    return {
+      rows: dataRows.result ?? [],
+      totalCount: dataRows.totalCount,
+      pageNo: dataRows.pageNo ?? 1,
+    }
+  }, [dataRows, noPagination])
+
+  const totalPages = Math.max(1, Math.ceil(totalCount / rowsPerPage))
+  const currentPage = Math.max(1, Math.min(pageNo, totalPages))
+  const isFirstPage = currentPage <= 1
+  const isLastPage = currentPage >= totalPages
+
+  function handleChangePage(newPage: number) {
+    requestDataByPageNo?.(rowsPerPage, newPage)
+  }
+
+  function handleChangeRowsPerPage(value: string) {
+    const perPage = Number(value)
+
+    if (!Number.isFinite(perPage) || perPage <= 0) {
+      return
+    }
+
+    setRowsPerPage(perPage)
+    requestDataByPageNo?.(perPage, 1)
   }
 
   return (
-    <div className={cn("space-y-4", className)}>
+    <div className={cn("relative space-y-4", className)}>
       <Table className={tableClassName}>
         <TableHeader>
           <TableRow>
-            {columns.map((column) => (
-              <TableHead key={column.id} className={column.className}>
-                {column.header}
+            {columns.map((column, index) => (
+              <TableHead
+                key={`${String(column.id)}-${index}`}
+                className={cn(errorHeader ? "text-red-600" : "", {
+                  "text-left": column.align === "left" || !column.align,
+                  "text-center": column.align === "center",
+                  "text-right": column.align === "right",
+                })}
+                style={column.minWidth ? { minWidth: column.minWidth } : {}}
+              >
+                {column.label}
               </TableHead>
             ))}
           </TableRow>
         </TableHeader>
         <TableBody>
-          {isLoading ? (
-            <TableRow>
-              <TableCell colSpan={columns.length} className="text-center">
-                {loadingMessage}
-              </TableCell>
-            </TableRow>
-          ) : error ? (
-            <TableRow>
-              <TableCell
-                colSpan={columns.length}
-                className="text-destructive text-center"
-              >
-                {error}
-              </TableCell>
-            </TableRow>
-          ) : hasRows ? (
+          {rows.length > 0 ? (
             rows.map((row, rowIndex) => (
               <TableRow key={rowIndex}>
-                {columns.map((column) => (
-                  <TableCell key={column.id} className={column.cellClassName}>
-                    {column.renderCell(row, rowIndex)}
-                  </TableCell>
-                ))}
+                {columns.map((column, columnIndex) => {
+                  const value = getRowValue(row, column.id)
+                  const status = getRowValue(row, column.status)
+                  const statusDesc = getRowValue(row, column.statusDesc)
+
+                  return (
+                    <TableCell
+                      key={`${String(column.id)}-${columnIndex}`}
+                      className={cn({
+                        "text-left": column.align === "left" || !column.align,
+                        "text-center": column.align === "center",
+                        "text-right": column.align === "right",
+                      })}
+                    >
+                      {column.format
+                        ? status || status === 0
+                          ? column.format(value, status, statusDesc, row, rowIndex)
+                          : column.format(value, undefined, undefined, row, rowIndex)
+                        : (value as string | number | null)}
+                    </TableCell>
+                  )
+                })}
               </TableRow>
             ))
           ) : (
             <TableRow>
-              <TableCell colSpan={columns.length} className="text-center">
+              <TableCell
+                colSpan={columns.length}
+                className="text-center text-red-600"
+              >
                 {emptyMessage}
               </TableCell>
             </TableRow>
@@ -155,48 +168,56 @@ function ServerTable<TRawData, TData = TRawData>({
         </TableBody>
       </Table>
 
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-muted-foreground text-sm">
-          Page {page} of {totalPages} ({totalRows} total rows)
-        </p>
-
-        <div className="flex items-center gap-2">
-          <label htmlFor="table-page-size" className="text-sm">
-            Rows per page
-          </label>
-          <select
-            id="table-page-size"
-            className="border-input bg-background rounded-md border px-2 py-1 text-sm"
-            value={currentPageSize}
-            onChange={(event) => handlePageSizeChange(event.target.value)}
-          >
-            {pageSizeOptions.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={goToPreviousPage}
-            disabled={isLoading || isFirstPage}
-          >
-            Previous
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={goToNextPage}
-            disabled={isLoading || isLastPage}
-          >
-            Next
-          </Button>
+      {loading && (
+        <div className="bg-background/50 absolute inset-0 grid place-items-center text-sm">
+          Loading...
         </div>
-      </div>
+      )}
+
+      {!noPagination && (
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-muted-foreground text-sm">
+            Page {currentPage} of {totalPages} ({totalCount} total rows)
+          </p>
+
+          <div className="flex items-center gap-2">
+            <label htmlFor="table-page-size" className="text-sm">
+              Rows per page
+            </label>
+            <select
+              id="table-page-size"
+              className="border-input bg-background rounded-md border px-2 py-1 text-sm"
+              value={rowsPerPage}
+              onChange={(event) => handleChangeRowsPerPage(event.target.value)}
+            >
+              {rowsPerPageOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => handleChangePage(Math.max(1, currentPage - 1))}
+              disabled={loading || isFirstPage}
+            >
+              Previous
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => handleChangePage(Math.min(totalPages, currentPage + 1))}
+              disabled={loading || isLastPage}
+            >
+              Next
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
